@@ -1,4 +1,3 @@
-// server.js - Enhanced for Railway deployment
 const express = require('express');
 const WebSocket = require('ws');
 const http = require('http');
@@ -13,156 +12,159 @@ let latestFrame = null;
 let connectedClients = new Set();
 let lastFrameTime = Date.now();
 
-// Middleware
+// Middleware for receiving JPEG frames
 app.use(express.raw({
   type: 'image/jpeg',
-  limit: '10mb', // Increased limit for larger frames
+  limit: '10mb',
   verify: (req, res, buf) => {
-    req.rawBody = buf; // Store raw buffer for validation
+    req.rawBody = buf;
   }
 }));
 
-app.use(express.static('public'));
-
-// Enhanced CORS headers
+// CORS middleware
 app.use((req, res, next) => {
-    res.header('Access-Control-Allow-Origin', '*');
-    res.header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
-    res.header('Access-Control-Allow-Headers', 'Origin, X-Requested-With, Content-Type, Accept, Content-Length');
-    res.header('Access-Control-Max-Age', '86400');
-    
-    // Handle preflight requests
-    if (req.method === 'OPTIONS') {
-        return res.sendStatus(200);
-    }
-    next();
+  res.header('Access-Control-Allow-Origin', '*');
+  res.header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
+  res.header('Access-Control-Allow-Headers', 'Content-Type');
+  next();
 });
 
-// Request logging middleware
-app.use((req, res, next) => {
-    console.log(`[${new Date().toISOString()}] ${req.method} ${req.path} - IP: ${req.ip}`);
-    next();
-});
-
-// Enhanced stream endpoint
+// Stream endpoint
 app.post('/stream', (req, res) => {
-    if (!req.rawBody || req.rawBody.length === 0) {
-        console.log('Empty frame received');
-        return res.status(400).json({ error: 'No frame data received' });
+  if (!req.rawBody || req.rawBody.length === 0) {
+    return res.status(400).json({ error: 'No frame data received' });
+  }
+
+  latestFrame = req.rawBody;
+  lastFrameTime = Date.now();
+
+  // Broadcast to all WebSocket clients
+  let clientsSent = 0;
+  connectedClients.forEach(client => {
+    if (client.readyState === WebSocket.OPEN) {
+      client.send(latestFrame, { binary: true });
+      clientsSent++;
     }
+  });
 
-    // Validate content type
-    if (!req.headers['content-type']?.includes('image/jpeg')) {
-        console.log('Invalid content type:', req.headers['content-type']);
-        return res.status(400).json({ error: 'Invalid content type' });
-    }
-
-    latestFrame = req.rawBody;
-    lastFrameTime = Date.now();
-    
-    console.log(`Frame received: ${req.rawBody.length} bytes from ${req.ip}`);
-
-    // Broadcast to all connected clients
-    let clientsSent = 0;
-    connectedClients.forEach(client => {
-        if (client.readyState === WebSocket.OPEN) {
-            try {
-                client.send(latestFrame, { binary: true });
-                clientsSent++;
-            } catch (error) {
-                console.error('WebSocket send error:', error);
-                connectedClients.delete(client);
-            }
-        }
-    });
-
-    res.status(200).json({ 
-        success: true, 
-        clients: clientsSent,
-        frameSize: req.rawBody.length,
-        timestamp: new Date().toISOString()
-    });
+  res.status(200).json({ 
+    success: true,
+    clients: clientsSent,
+    frameSize: req.rawBody.length
+  });
 });
 
-// WebSocket connection handler
-wss.on('connection', (ws, req) => {
-    const clientId = req.headers['sec-websocket-key'] || Math.random().toString(36).substring(7);
-    console.log(`New WebSocket connection: ${clientId}`);
-    
-    connectedClients.add(ws);
-    
-    // Send latest frame if available
-    if (latestFrame && (Date.now() - lastFrameTime) < 10000) {
-        ws.send(latestFrame, { binary: true });
-    }
-    
-    ws.on('close', () => {
-        console.log(`WebSocket closed: ${clientId}`);
-        connectedClients.delete(ws);
-    });
-    
-    ws.on('error', (error) => {
-        console.error(`WebSocket error (${clientId}):`, error);
-        connectedClients.delete(ws);
-    });
+// WebSocket handler
+wss.on('connection', (ws) => {
+  connectedClients.add(ws);
+  
+  // Send latest frame if available
+  if (latestFrame) {
+    ws.send(latestFrame, { binary: true });
+  }
+
+  ws.on('close', () => {
+    connectedClients.delete(ws);
+  });
 });
 
-// Enhanced health check endpoint
-app.get('/health', (req, res) => {
-    const status = {
-        status: 'ok',
-        timestamp: new Date().toISOString(),
-        uptime: process.uptime(),
-        memory: process.memoryUsage(),
-        clients: {
-            http: connectedClients.size,
-            lastFrame: latestFrame ? {
-                size: latestFrame.length,
-                age: Date.now() - lastFrameTime
-            } : null
-        },
-        environment: process.env.NODE_ENV || 'development'
-    };
-    res.json(status);
-});
-
-// API endpoint to get stream status
-app.get('/api/status', (req, res) => {
-    res.json({
-        streaming: !!latestFrame,
-        lastFrame: lastFrameTime,
-        clients: connectedClients.size,
-        serverTime: Date.now()
-    });
-});
-
-// Serve the viewer page
+// Serve HTML viewer directly
 app.get('/', (req, res) => {
-    res.sendFile(path.join(__dirname, 'public', 'index.html'));
+  res.send(`
+    <!DOCTYPE html>
+    <html>
+    <head>
+      <title>ESP32-CAM Stream Viewer</title>
+      <style>
+        body { font-family: Arial, sans-serif; margin: 0; padding: 20px; background: #f0f0f0; }
+        .container { max-width: 800px; margin: 0 auto; background: white; padding: 20px; border-radius: 8px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); }
+        h1 { color: #333; text-align: center; }
+        #stream { width: 100%; background: black; display: block; margin: 20px 0; }
+        .stats { background: #f8f8f8; padding: 15px; border-radius: 5px; margin-top: 20px; }
+      </style>
+    </head>
+    <body>
+      <div class="container">
+        <h1>ESP32-CAM Live Stream</h1>
+        <img id="stream" alt="Live Stream">
+        <div class="stats">
+          <p>Status: <span id="status">Connecting...</span></p>
+          <p>FPS: <span id="fps">0</span></p>
+          <p>Last Update: <span id="lastUpdate">Never</span></p>
+        </div>
+      </div>
+
+      <script>
+        const streamImg = document.getElementById('stream');
+        const statusEl = document.getElementById('status');
+        const fpsEl = document.getElementById('fps');
+        const lastUpdateEl = document.getElementById('lastUpdate');
+        
+        let frameCount = 0;
+        let fps = 0;
+        let lastFrameTime = 0;
+        let ws;
+        
+        function connectWebSocket() {
+          const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+          ws = new WebSocket(\`\${protocol}//\${window.location.host}\`);
+          
+          ws.onopen = () => {
+            statusEl.textContent = 'Connected';
+          };
+          
+          ws.onmessage = (event) => {
+            if (event.data instanceof Blob) {
+              frameCount++;
+              const now = Date.now();
+              if (lastFrameTime > 0) {
+                fps = Math.round(1000 / (now - lastFrameTime));
+              }
+              lastFrameTime = now;
+              
+              const url = URL.createObjectURL(event.data);
+              streamImg.onload = () => URL.revokeObjectURL(url);
+              streamImg.src = url;
+              
+              fpsEl.textContent = fps;
+              lastUpdateEl.textContent = new Date().toLocaleTimeString();
+            }
+          };
+          
+          ws.onclose = () => {
+            statusEl.textContent = 'Disconnected - Reconnecting...';
+            setTimeout(connectWebSocket, 1000);
+          };
+          
+          ws.onerror = (error) => {
+            statusEl.textContent = 'Connection Error';
+            console.error('WebSocket error:', error);
+          };
+        }
+        
+        connectWebSocket();
+      </script>
+    </body>
+    </html>
+  `);
 });
 
-// Error handling middleware
-app.use((err, req, res, next) => {
-    console.error('Server error:', err);
-    res.status(500).json({ error: 'Internal server error' });
+// Health check endpoint
+app.get('/health', (req, res) => {
+  res.json({
+    status: 'ok',
+    clients: connectedClients.size,
+    lastFrame: latestFrame ? {
+      size: latestFrame.length,
+      age: Date.now() - lastFrameTime
+    } : null
+  });
 });
 
-// Start the server
+// Start server
 const PORT = process.env.PORT || 3000;
 server.listen(PORT, () => {
-    console.log(`Server running on port ${PORT}`);
-    console.log(`Web interface: http://localhost:${PORT}`);
-    console.log(`Stream endpoint: POST http://localhost:${PORT}/stream`);
-});
-
-// Graceful shutdown
-['SIGTERM', 'SIGINT'].forEach(signal => {
-    process.on(signal, () => {
-        console.log(`${signal} received - shutting down`);
-        wss.clients.forEach(client => client.close());
-        server.close(() => {
-            console.log('Server closed');
-            process.exit(0);
-        });
-    });
+  console.log(`Server running on port ${PORT}`);
+  console.log(`Web viewer: http://localhost:${PORT}`);
+  console.log(`Stream endpoint: POST http://localhost:${PORT}/stream`);
 });
