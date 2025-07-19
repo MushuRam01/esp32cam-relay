@@ -75,11 +75,43 @@ wss.on('connection', (ws) => {
   });
 });
 
-// Serve HTML viewer directly with password protection
-app.get('/', (req, res) => { 
-  const { password } = req.query; // Get password from query parameters
+// NEW: Serve the password login page
+app.get('/', (req, res) => {
+  res.send(`
+    <!DOCTYPE html>
+    <html>
+    <head>
+      <title>Login - ESP32-CAM Stream</title>
+      <meta name="viewport" content="width=device-width, initial-scale=1">
+      <style>
+        body { font-family: Arial, sans-serif; display: flex; justify-content: center; align-items: center; height: 100vh; margin: 0; background: #f0f0f0; }
+        .login-container { text-align: center; background: white; padding: 40px; border-radius: 8px; box-shadow: 0 4px 10px rgba(0,0,0,0.1); }
+        h1 { color: #333; margin-bottom: 20px; }
+        input[type="password"] { width: 100%; padding: 12px; margin-bottom: 20px; border: 1px solid #ccc; border-radius: 4px; box-sizing: border-box; }
+        input[type="submit"] { width: 100%; padding: 12px; background: #007bff; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 16px; }
+        input[type="submit"]:hover { background: #0056b3; }
+      </style>
+    </head>
+    <body>
+      <div class="login-container">
+        <h1>Enter Password to View Stream</h1>
+        <form action="/login" method="post">
+          <input type="password" name="password" placeholder="Password" required autofocus>
+          <input type="submit" value="Login">
+        </form>
+      </div>
+    </body>
+    </html>
+  `);
+});
 
+// NEW: Handle the login attempt
+app.post('/login', (req, res) => {
+  const { password } = req.body;
+
+  // Check if the submitted password is correct
   if (password === VIEW_PASSWORD) {
+    // If correct, send the stream viewer page
     res.send(`
       <!DOCTYPE html>
       <html>
@@ -89,7 +121,7 @@ app.get('/', (req, res) => {
           body { font-family: Arial, sans-serif; margin: 0; padding: 20px; background: #f0f0f0; }
           .container { max-width: 800px; margin: 0 auto; background: white; padding: 20px; border-radius: 8px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); }
           h1 { color: #333; text-align: center; }
-          #stream { width: 100%; background: black; display: block; margin: 20px 0; }
+          #stream { width: 100%; background: black; display: block; margin: 20px 0; border: 1px solid #ddd; }
           .stats { background: #f8f8f8; padding: 15px; border-radius: 5px; margin-top: 20px; }
         </style>
       </head>
@@ -103,86 +135,59 @@ app.get('/', (req, res) => {
             <p>Last Update: <span id="lastUpdate">Never</span></p>
           </div>
         </div>
-
         <script>
           const streamImg = document.getElementById('stream');
           const statusEl = document.getElementById('status');
           const fpsEl = document.getElementById('fps');
           const lastUpdateEl = document.getElementById('lastUpdate');
-
-          let frameCount = 0;
-          let fps = 0;
-          let lastFrameTime = 0;
           let ws;
 
           function connectWebSocket() {
             const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
             ws = new WebSocket(\`\${protocol}//\${window.location.host}\`);
 
-            ws.onopen = () => {
-              statusEl.textContent = 'Connected';
-            };
-
+            ws.onopen = () => { statusEl.textContent = 'Connected'; };
             ws.onmessage = (event) => {
               if (event.data instanceof Blob) {
-                frameCount++;
-                const now = Date.now();
-                if (lastFrameTime > 0) {
-                  fps = Math.round(1000 / (now - lastFrameTime));
-                }
-                lastFrameTime = now;
-
                 const url = URL.createObjectURL(event.data);
-                streamImg.onload = () => URL.revokeObjectURL(url);
                 streamImg.src = url;
-
-                fpsEl.textContent = fps;
+                streamImg.onload = () => URL.revokeObjectURL(url);
                 lastUpdateEl.textContent = new Date().toLocaleTimeString();
               }
             };
-
             ws.onclose = () => {
               statusEl.textContent = 'Disconnected - Reconnecting...';
-              setTimeout(connectWebSocket, 1000);
+              setTimeout(connectWebSocket, 2000);
             };
-
             ws.onerror = (error) => {
               statusEl.textContent = 'Connection Error';
               console.error('WebSocket error:', error);
             };
           }
-
           connectWebSocket();
         </script>
       </body>
       </html>
     `);
   } else {
+    // If incorrect, send an "Access Denied" message
     res.status(401).send(`
       <!DOCTYPE html>
       <html>
-      <head>
-        <title>Access Denied</title>
-        <style>
-          body { font-family: Arial, sans-serif; text-align: center; padding: 50px; background: #f0f0f0; }
-          .container { max-width: 400px; margin: 0 auto; background: white; padding: 30px; border-radius: 8px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); }
-          h1 { color: #d9534f; }
-          p { color: #555; }
-        </style>
+      <head><title>Access Denied</title>
+      <style>body { font-family: Arial, sans-serif; text-align: center; padding: 50px; } h1 { color: #d9534f; } a { color: #007bff; text-decoration: none; }</style>
       </head>
       <body>
-        <div class="container">
-          <h1>Access Denied</h1>
-          <p>Please provide the correct password to view the stream.</p>
-          <p>Example: <pre>http://localhost:${process.env.PORT || 3000}/?password=your_secret_password</pre></p>
-        </div>
+        <h1>🚫 Access Denied</h1>
+        <p>The password you entered is incorrect.</p>
+        <p><a href="/">Please try again.</a></p>
       </body>
       </html>
     `);
   }
 });
 
-// Health check endpoint
+// Health check endpoint (No changes here)
 app.get('/health', (req, res) => {
   res.json({
     status: 'ok',
@@ -201,3 +206,4 @@ server.listen(PORT, () => {
   console.log(`Web viewer: http://localhost:${PORT}`);
   console.log(`Stream endpoint: POST http://localhost:${PORT}/stream`);
 });
+
