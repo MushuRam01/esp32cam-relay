@@ -13,6 +13,8 @@ const VIEW_PASSWORD = env.VIEW_PASSWORD ; // Default password, can be overridden
 
 // you may use this format also       const VIEW_PASSWORD = env.VIEW_PASSWORD || 'HomeStream123@'; // Default password, can be overridden by .env file
 
+// This middleware is required to parse the body of POST requests from HTML forms
+app.use(express.urlencoded({ extended: true }));
 
 // Store the latest frame and connected clients
 let latestFrame = null;
