@@ -18,8 +18,8 @@ install NodeJS and npm on your local machine
 ### Usage
   - You will be able to view the stream from an esp32 cam from anywhere if you host this code on a service like railway.com
   - To host your own instance on a service just fork/copy the repo and link it to your sevice. It should be readily deployable 
-### Esp32-CAM Setup
+## Esp32-CAM Setup
 The code for the Esp-CAM can be found on my GitHub repo named esp32-HTTPS-stream . Can also be accesed by [This Link](https://github.com/MushuRam01/esp32-HTTPS-stream). This code streams to page that uses this code and is hosted on railway.com
 
-### Contributing
+## Contributing
 Feel free to fork the repository, open issues, or submit pull requests if you have suggestions or improvements.
